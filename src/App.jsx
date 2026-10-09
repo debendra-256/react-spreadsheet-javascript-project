@@ -1,24 +1,48 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { loadContacts, saveContacts } from "./contactsDb.js";
 
 const SAMPLE = [
   { id: "contact-1", name: "Aarav Sharma", email: "aarav@example.com", phone: "9876543210" },
   { id: "contact-2", name: "Priya Das", email: "priya@example.com", phone: "9123456780" }
 ];
-const HEADERS = ["id", "name", "email", "phone"];
 
 export default function App() {
-  const [contacts, setContacts] = useState(SAMPLE);
+  const [contacts, setContacts] = useState([]);
   const [form, setForm] = useState({ name: "", email: "", phone: "" });
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
-  const [message, setMessage] = useState("Connect an Excel workbook to load and save your contacts.");
-  const [fileName, setFileName] = useState("");
-  const [fileHandle, setFileHandle] = useState(null);
-  const [canWriteDirectly, setCanWriteDirectly] = useState(
-    typeof window !== "undefined" && "showOpenFilePicker" in window
-  );
+  const [message, setMessage] = useState("Opening the contacts database…");
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasImportedChanges, setHasImportedChanges] = useState(false);
   const importInput = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initializeDatabase() {
+      try {
+        let storedContacts = await loadContacts();
+        if (storedContacts.length === 0) {
+          storedContacts = SAMPLE;
+          await saveContacts(storedContacts);
+        }
+        if (isMounted) {
+          setContacts(storedContacts);
+          setMessage("Contacts are saved in this browser's database.");
+        }
+      } catch (error) {
+        console.error(error);
+        if (isMounted) setMessage("Could not open the contacts database in this browser.");
+      } finally {
+        if (isMounted) setIsLoaded(true);
+      }
+    }
+
+    initializeDatabase();
+    return () => { isMounted = false; };
+  }, []);
 
   function parseWorkbook(buffer) {
     const workbook = XLSX.read(buffer, { type: "array" });
@@ -32,92 +56,67 @@ export default function App() {
     }));
   }
 
-  async function connectSpreadsheet() {
-    try {
-      if ("showOpenFilePicker" in window) {
-        const [handle] = await window.showOpenFilePicker({
-          multiple: false,
-          types: [{ description: "Excel spreadsheet", accept: {
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-            "application/vnd.ms-excel": [".xls"]
-          }}]
-        });
-        const file = await handle.getFile();
-        const rows = parseWorkbook(await file.arrayBuffer());
-        setFileHandle(handle);
-        setFileName(file.name);
-        setContacts(rows);
-        setMessage(`Connected to ${file.name}. Make changes and click Save to spreadsheet.`);
-        setCanWriteDirectly(true);
-      } else {
-        importInput.current?.click();
-      }
-    } catch (error) {
-      if (error?.name !== "AbortError") setMessage("Could not open the spreadsheet. Please try again.");
-    }
-  }
-
   async function importSpreadsheet(event) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       setContacts(parseWorkbook(await file.arrayBuffer()));
-      setFileName(file.name);
-      setFileHandle(null);
-      setMessage(`Imported ${file.name}. After editing, download the updated spreadsheet.`);
+      setHasImportedChanges(true);
+      setMessage(`Loaded ${file.name}. Save once to store these contacts in the database.`);
     } catch {
       setMessage("Could not read this file. Please select a valid Excel workbook.");
     }
     event.target.value = "";
   }
 
-  function makeWorkbook(rows) {
-    const workbook = XLSX.utils.book_new();
-    const sheet = XLSX.utils.json_to_sheet(rows.map(({ id, name, email, phone }) => ({ id, name, email, phone })), { header: HEADERS });
-    XLSX.utils.book_append_sheet(workbook, sheet, "Contacts");
-    return workbook;
-  }
-
-  async function saveSpreadsheet() {
+  async function persistContacts(nextContacts, successMessage) {
+    setIsSaving(true);
     try {
-      const workbook = makeWorkbook(contacts);
-      if (fileHandle && "createWritable" in fileHandle) {
-        const writable = await fileHandle.createWritable();
-        await writable.write(XLSX.write(workbook, { bookType: "xlsx", type: "array" }));
-        await writable.close();
-        setMessage(`Saved ${contacts.length} contacts to ${fileName}.`);
-      } else {
-        XLSX.writeFile(workbook, "contacts-updated.xlsx");
-        setMessage("Downloaded contacts-updated.xlsx. Replace your original file manually if needed.");
-      }
+      await saveContacts(nextContacts);
+      setContacts(nextContacts);
+      setHasImportedChanges(false);
+      setMessage(successMessage);
+      return true;
     } catch (error) {
       console.error(error);
-      setMessage("Could not save the spreadsheet. Try reconnecting the file.");
+      setMessage("Could not save to the database. Please try again.");
+      return false;
+    } finally {
+      setIsSaving(false);
     }
+  }
+
+  async function saveAllContacts() {
+    await persistContacts(contacts, `Saved ${contacts.length} contacts to this browser's database.`);
   }
 
   function updateField(event) {
     setForm({ ...form, [event.target.name]: event.target.value });
   }
 
-  function submitForm(event) {
+  async function submitForm(event) {
     event.preventDefault();
     const name = form.name.trim();
     const email = form.email.trim();
-    if (!name || !email) return;
-    if (editingId) {
-      setContacts((current) => current.map((item) => item.id === editingId
-        ? { ...item, name, email, phone: form.phone.trim() } : item));
-      setMessage("Contact updated in the app. Click Save to spreadsheet to persist the change.");
-    } else {
-      setContacts((current) => [...current, {
+    if (!name || !email || isSaving) return;
+
+    const nextContacts = editingId
+      ? contacts.map((item) => item.id === editingId
+        ? { ...item, name, email, phone: form.phone.trim() } : item)
+      : [...contacts, {
         id: globalThis.crypto?.randomUUID?.() || `contact-${Date.now()}`,
-        name, email, phone: form.phone.trim()
-      }]);
-      setMessage("Contact added in the app. Click Save to spreadsheet to persist the change.");
+        name,
+        email,
+        phone: form.phone.trim()
+      }];
+    const saved = await persistContacts(
+      nextContacts,
+      editingId ? "Contact updated in the database." : "Contact added to the database."
+    );
+    if (saved) {
+      setForm({ name: "", email: "", phone: "" });
+      setEditingId(null);
     }
-    setForm({ name: "", email: "", phone: "" });
-    setEditingId(null);
   }
 
   function editContact(contact) {
@@ -126,10 +125,15 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function deleteContact(id) {
+  async function deleteContact(id) {
     if (!window.confirm("Delete this contact?")) return;
-    setContacts((current) => current.filter((item) => item.id !== id));
-    setMessage("Contact deleted in the app. Click Save to spreadsheet to persist the change.");
+    const nextContacts = contacts.filter((item) => item.id !== id);
+    await persistContacts(nextContacts, "Contact deleted from the database.");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm({ name: "", email: "", phone: "" });
   }
 
   const filtered = contacts.filter((contact) =>
@@ -141,19 +145,23 @@ export default function App() {
   return (
     <main className="page">
       <header className="hero">
-        <div className="eyebrow">REACT + JAVASCRIPT + EXCEL</div>
+        <div className="eyebrow">REACT + JAVASCRIPT + DATABASE</div>
         <h1>Contact Manager</h1>
-        <p>A simple contact app that reads and saves an Excel workbook directly in your browser.</p>
+        <p>Add, edit, and keep your contacts in this browser without downloading a spreadsheet after every change.</p>
       </header>
 
       <section className="panel connection">
         <div className="connection-copy">
-          <h2>Spreadsheet</h2>
-          <p className="muted">{fileName ? `Selected file: ${fileName}` : "No spreadsheet connected yet."}</p>
+          <h2>Database</h2>
+          <p className="muted">Contacts are saved in this browser and loaded automatically when you return.</p>
         </div>
         <div className="connection-actions">
-          <button className="secondary" onClick={connectSpreadsheet}>Connect spreadsheet</button>
-          <button className="primary" onClick={saveSpreadsheet}>Save to spreadsheet</button>
+          <button className="secondary" type="button" onClick={() => importInput.current?.click()} disabled={!isLoaded || isSaving}>
+            Import Excel workbook
+          </button>
+          <button className="primary" type="button" onClick={saveAllContacts} disabled={!isLoaded || isSaving}>
+            {isSaving ? "Saving…" : hasImportedChanges ? "Save imported contacts to database" : "Save to database"}
+          </button>
           <input ref={importInput} type="file" accept=".xlsx,.xls" hidden onChange={importSpreadsheet} />
         </div>
         <p className="status" role="status">{message}</p>
@@ -163,19 +171,19 @@ export default function App() {
         <h2>{editingId ? "Edit contact" : "Add a contact"}</h2>
         <form onSubmit={submitForm} className="contact-form">
           <label>Full name *
-            <input name="name" value={form.name} onChange={updateField} placeholder="e.g. Riya Patnaik" required />
+            <input name="name" value={form.name} onChange={updateField} placeholder="e.g. Riya Patnaik" required disabled={!isLoaded || isSaving} />
           </label>
           <label>Email address *
-            <input name="email" type="email" value={form.email} onChange={updateField} placeholder="riya@example.com" required />
+            <input name="email" type="email" value={form.email} onChange={updateField} placeholder="riya@example.com" required disabled={!isLoaded || isSaving} />
           </label>
           <label>Phone number
-            <input name="phone" value={form.phone} onChange={updateField} placeholder="Optional" />
+            <input name="phone" value={form.phone} onChange={updateField} placeholder="Optional" disabled={!isLoaded || isSaving} />
           </label>
           <div className="form-actions">
-            <button className="primary" type="submit">{editingId ? "Save changes" : "Add contact"}</button>
-            {editingId && <button className="secondary" type="button" onClick={() => {
-              setEditingId(null); setForm({ name: "", email: "", phone: "" });
-            }}>Cancel</button>}
+            <button className="primary" type="submit" disabled={!isLoaded || isSaving}>
+              {isSaving ? "Saving…" : editingId ? "Save changes to database" : "Add contact to database"}
+            </button>
+            {editingId && <button className="secondary" type="button" onClick={cancelEdit}>Cancel</button>}
           </div>
         </form>
       </section>
@@ -192,8 +200,8 @@ export default function App() {
               {filtered.map((contact) => <tr key={contact.id}>
                 <td><strong>{contact.name}</strong></td><td>{contact.email}</td><td>{contact.phone || "—"}</td>
                 <td className="actions">
-                  <button className="text-button" onClick={() => editContact(contact)}>Edit</button>
-                  <button className="text-button danger" onClick={() => deleteContact(contact.id)}>Delete</button>
+                  <button className="text-button" onClick={() => editContact(contact)} disabled={!isLoaded || isSaving}>Edit</button>
+                  <button className="text-button danger" onClick={() => deleteContact(contact.id)} disabled={!isLoaded || isSaving}>Delete</button>
                 </td>
               </tr>)}
               {filtered.length === 0 && <tr><td colSpan="4" className="empty">No contacts found.</td></tr>}
@@ -201,7 +209,7 @@ export default function App() {
           </table>
         </div>
       </section>
-      <footer>Browser-only spreadsheet demo · {canWriteDirectly ? "Direct file saving supported by this browser" : "Import and download mode"}</footer>
+      <footer>Stored locally in this browser · Import an Excel workbook once if needed</footer>
     </main>
   );
 }

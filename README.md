@@ -1,37 +1,23 @@
-# React + JavaScript + Spreadsheet Demo
+# React Contact Manager
 
-This is a simple React app that reads and writes an Excel spreadsheet **in the browser**, without a Node.js backend.
+A React app for managing contacts in the browser. Contacts are stored in IndexedDB, so they remain available in the same browser without downloading an updated spreadsheet after each change.
 
-## Important limitation
-Browsers cannot silently open and edit an arbitrary local `.xlsx` file. This demo uses the browser's File System Access API where supported (Chrome/Edge):
-1. Click **Connect spreadsheet** and select an existing `.xlsx` file, or create/select a spreadsheet file.
-2. The app reads the `Contacts` sheet.
-3. Add/edit/delete contacts in the UI.
-4. Click **Save to spreadsheet** to write the updated rows back to the selected file.
+## Features
 
-For browsers without File System Access API support, the app can import an Excel file and download an updated copy, but it cannot overwrite the original automatically.
+- Add, edit, and delete contacts with changes saved to the browser database.
+- Load contacts automatically when the app opens again in the same browser.
+- Import an Excel workbook once, then save its contacts to the browser database.
+- Search contacts by name, email, or phone number.
 
-## Run it
-Requires Node.js only to run the Vite development server; there is **no Node.js backend**.
+The database is local to each browser and device. It does not sync between users or devices. The Excel import accepts a workbook with a `Contacts` sheet and `id`, `name`, `email`, and `phone` columns. If the sheet is absent, the first worksheet is used.
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the local URL shown by Vite, usually http://localhost:5173.
+## Deploy
 
-## Spreadsheet format
-Use an Excel workbook with a sheet named `Contacts` and columns:
-- `id` (optional; generated if missing)
-- `name`
-- `email`
-- `phone`
-
-If the sheet is empty or absent, the app starts with sample contacts and can save them to the workbook.
-
-## Files
-- `src/App.jsx` — UI and spreadsheet operations
-- `src/main.jsx` — React entry point
-- `src/style.css` — styling
-- `index.html` — app HTML
+Push to the `main` branch. GitHub Actions builds the app and publishes the `dist` folder to GitHub Pages.
