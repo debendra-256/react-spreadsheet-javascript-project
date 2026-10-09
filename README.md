@@ -6,6 +6,8 @@ A React app for managing contacts in the browser. Contacts are stored in Indexed
 
 - Add, edit, and delete contacts with changes saved to the browser database.
 - Load contacts automatically when the app opens again in the same browser.
+- Update individual contacts without rewriting the full database.
+- Browse large contact lists 50 rows at a time.
 - Import an Excel workbook once, then save its contacts to the browser database.
 - Search contacts by name, email, or phone number.
 

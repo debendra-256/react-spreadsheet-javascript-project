@@ -36,6 +36,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .text-button:hover { background: #f1f3ff; }
 .text-button.danger { color: #c43f4b; }
 .empty { color: #7b8496; text-align: center; padding: 28px; }
+.pagination { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding-top: 16px; color: #697386; font-size: 13px; }
+.pagination-controls { display: flex; align-items: center; gap: 12px; }
+.pagination-controls button { padding: 8px 11px; }
+button:disabled { cursor: not-allowed; opacity: .55; }
 footer { text-align: center; color: #7b8496; font-size: 12px; padding: 14px; }
 @media (max-width: 720px) {
   .page { padding-top: 26px; }
@@ -44,4 +48,5 @@ footer { text-align: center; color: #7b8496; font-size: 12px; padding: 14px; }
   .search { max-width: none; }
   .panel { padding: 18px; }
   th, td { padding: 12px 9px; }
+  .pagination { align-items: flex-start; flex-direction: column; }
 }

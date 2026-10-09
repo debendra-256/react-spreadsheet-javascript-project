@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { loadContacts, saveContacts } from "./contactsDb.js";
+import { loadContacts, removeContact, saveContact, saveContacts } from "./contactsDb.js";
 
 const SAMPLE = [
   { id: "contact-1", name: "Aarav Sharma", email: "aarav@example.com", phone: "9876543210" },
   { id: "contact-2", name: "Priya Das", email: "priya@example.com", phone: "9123456780" }
 ];
+const PAGE_SIZE = 50;
 
 export default function App() {
   const [contacts, setContacts] = useState([]);
   const [form, setForm] = useState({ name: "", email: "", phone: "" });
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [message, setMessage] = useState("Opening the contacts database…");
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -61,6 +63,7 @@ export default function App() {
     if (!file) return;
     try {
       setContacts(parseWorkbook(await file.arrayBuffer()));
+      setPage(1);
       setHasImportedChanges(true);
       setMessage(`Loaded ${file.name}. Save once to store these contacts in the database.`);
     } catch {
@@ -100,22 +103,39 @@ export default function App() {
     const email = form.email.trim();
     if (!name || !email || isSaving) return;
 
-    const nextContacts = editingId
-      ? contacts.map((item) => item.id === editingId
-        ? { ...item, name, email, phone: form.phone.trim() } : item)
-      : [...contacts, {
+    const savedContact = editingId
+      ? { ...contacts.find((item) => item.id === editingId), name, email, phone: form.phone.trim() }
+      : {
         id: globalThis.crypto?.randomUUID?.() || `contact-${Date.now()}`,
         name,
         email,
         phone: form.phone.trim()
-      }];
-    const saved = await persistContacts(
-      nextContacts,
-      editingId ? "Contact updated in the database." : "Contact added to the database."
-    );
-    if (saved) {
+      };
+
+    setIsSaving(true);
+    try {
+      if (hasImportedChanges) {
+        const nextContacts = editingId
+          ? contacts.map((item) => item.id === editingId ? savedContact : item)
+          : [...contacts, savedContact];
+        await saveContacts(nextContacts);
+        setContacts(nextContacts);
+        setHasImportedChanges(false);
+      } else {
+        await saveContact(savedContact);
+        setContacts((current) => editingId
+          ? current.map((item) => item.id === editingId ? savedContact : item)
+          : [...current, savedContact]);
+      }
+      setMessage(editingId ? "Contact updated in the database." : "Contact added to the database.");
+      if (!editingId) setPage(1);
       setForm({ name: "", email: "", phone: "" });
       setEditingId(null);
+    } catch (error) {
+      console.error(error);
+      setMessage("Could not save to the database. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -128,7 +148,22 @@ export default function App() {
   async function deleteContact(id) {
     if (!window.confirm("Delete this contact?")) return;
     const nextContacts = contacts.filter((item) => item.id !== id);
-    await persistContacts(nextContacts, "Contact deleted from the database.");
+    setIsSaving(true);
+    try {
+      if (hasImportedChanges) {
+        await saveContacts(nextContacts);
+        setHasImportedChanges(false);
+      } else {
+        await removeContact(id);
+      }
+      setContacts(nextContacts);
+      setMessage("Contact deleted from the database.");
+    } catch (error) {
+      console.error(error);
+      setMessage("Could not delete this contact. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function cancelEdit() {
@@ -141,6 +176,9 @@ export default function App() {
       String(value ?? "").toLowerCase().includes(search.toLowerCase())
     )
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleContacts = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <main className="page">
@@ -191,13 +229,13 @@ export default function App() {
       <section className="panel">
         <div className="list-heading">
           <div><h2>Contacts</h2><p className="muted">{contacts.length} total contacts</p></div>
-          <input className="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts..." aria-label="Search contacts" />
+          <input className="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search contacts..." aria-label="Search contacts" />
         </div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Actions</th></tr></thead>
             <tbody>
-              {filtered.map((contact) => <tr key={contact.id}>
+              {visibleContacts.map((contact) => <tr key={contact.id}>
                 <td><strong>{contact.name}</strong></td><td>{contact.email}</td><td>{contact.phone || "—"}</td>
                 <td className="actions">
                   <button className="text-button" onClick={() => editContact(contact)} disabled={!isLoaded || isSaving}>Edit</button>
@@ -208,6 +246,14 @@ export default function App() {
             </tbody>
           </table>
         </div>
+        {filtered.length > 0 && <div className="pagination">
+          <span>Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+          <div className="pagination-controls">
+            <button className="secondary" type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1}>Previous</button>
+            <span>Page {currentPage} of {totalPages}</span>
+            <button className="secondary" type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === totalPages}>Next</button>
+          </div>
+        </div>}
       </section>
       <footer>Stored locally in this browser · Import an Excel workbook once if needed</footer>
     </main>

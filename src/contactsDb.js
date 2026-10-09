@@ -45,3 +45,33 @@ export async function saveContacts(contacts) {
     database.close();
   }
 }
+
+export async function saveContact(contact) {
+  const database = await openDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).put(contact);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error("Could not save contact."));
+      transaction.onabort = () => reject(transaction.error || new Error("Saving the contact was cancelled."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function removeContact(id) {
+  const database = await openDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).delete(id);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error("Could not delete contact."));
+      transaction.onabort = () => reject(transaction.error || new Error("Deleting the contact was cancelled."));
+    });
+  } finally {
+    database.close();
+  }
+}
